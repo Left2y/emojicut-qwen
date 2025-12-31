@@ -32,8 +32,8 @@
 
 ```bash
 # 克隆项目
-git clone https://github.com/Rayinf/EmojiCut.git
-cd EmojiCut
+git clone https://github.com/Left2y/emojicut-qwen.git
+cd emojicut-qwen
 
 # 安装依赖
 npm install
@@ -46,7 +46,7 @@ npm install
 npm run dev
 ```
 
-访问 http://localhost:3000 开始使用！
+访问 http://localhost:3002 开始使用！
 
 ## 📖 使用说明
 
