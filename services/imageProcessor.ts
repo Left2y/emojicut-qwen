@@ -72,41 +72,6 @@ const mergeRects = (rects: Rect[], distanceThreshold: number): Rect[] => {
 };
 
 /**
- * Force grid splitting if only one large segment is detected.
- * This is a fallback for when AI generates a grid but our detector sees it as one blob.
- */
-const forceGridSplit = (rect: Rect, width: number, height: number): Rect[] => {
-    // If the detected rect covers most of the image, assume it's a grid
-    const areaRatio = ((rect.maxX - rect.minX) * (rect.maxY - rect.minY)) / (width * height);
-    
-    if (areaRatio > 0.5) {
-        // Assume 4x4 grid (16 stickers)
-        const cols = 4;
-        const rows = 4;
-        const newRects: Rect[] = [];
-        const cellW = width / cols;
-        const cellH = height / rows;
-        
-        // Add some margin to avoid cutting edges
-        const margin = 10; 
-
-        for (let y = 0; y < rows; y++) {
-            for (let x = 0; x < cols; x++) {
-                newRects.push({
-                    minX: Math.floor(x * cellW + margin),
-                    maxX: Math.floor((x + 1) * cellW - margin),
-                    minY: Math.floor(y * cellH + margin),
-                    maxY: Math.floor((y + 1) * cellH - margin)
-                });
-            }
-        }
-        return newRects;
-    }
-    return [rect];
-};
-
-
-/**
  * Extracts a specific region from an image/canvas, removes background, and adds a white stroke.
  */
 export const extractStickerFromRect = (
@@ -196,7 +161,7 @@ export const extractStickerFromRect = (
 };
 
 /**
- * Main function to process the sticker sheet.
+ * Advanced Sticker Segmentation: Erosion -> Seed Detection -> Region Growing
  */
 export const processStickerSheet = async (
   image: HTMLImageElement,
@@ -213,148 +178,158 @@ export const processStickerSheet = async (
   const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
   const { width, height, data } = imageData;
 
-  // --- Advanced Segmentation Logic: Erosion -> Detection -> Expansion ---
+  onProgress("Preprocessing image...");
 
-  // 1. Create a binary map (1 = foreground, 0 = background)
+  // 1. Binary Map Generation
+  // Foreground = 1, Background = 0
   const binaryMap = new Uint8Array(width * height);
-  const erosionMap = new Uint8Array(width * height);
-  
-  // High threshold to treat light shadows as background
   const bgThreshold = 240; 
 
   for (let i = 0; i < width * height; i++) {
     const idx = i * 4;
-    // If pixel is NOT background (i.e., it is part of a sticker)
+    // Strict background check
     if (!isBackground(data[idx], data[idx + 1], data[idx + 2], data[idx + 3], bgThreshold)) {
       binaryMap[i] = 1;
-    } else {
-      binaryMap[i] = 0;
     }
   }
 
-  // 2. Perform Erosion (shrink objects to break connections)
-  // Kernel size 3 (checking 1 pixel radius)
-  onProgress("Refining shapes...");
-  for (let y = 1; y < height - 1; y++) {
-    for (let x = 1; x < width - 1; x++) {
-      const idx = y * width + x;
-      if (binaryMap[idx] === 1) {
-        // Check neighbors. If any neighbor is background, erode this pixel.
-        // Using 4-connectivity for speed
-        if (binaryMap[idx - 1] === 0 || binaryMap[idx + 1] === 0 || 
-            binaryMap[idx - width] === 0 || binaryMap[idx + width] === 0) {
-            erosionMap[idx] = 0;
-        } else {
-            erosionMap[idx] = 1;
-        }
-      }
-    }
-  }
-
-  // 3. Detect Connected Components on the ERODED map
-  const rawRects: Rect[] = [];
-  const visited = new Uint8Array(width * height);
-
-  for (let y = 0; y < height; y++) { 
-    for (let x = 0; x < width; x++) {
-      const visitIdx = y * width + x;
-      if (visited[visitIdx] || erosionMap[visitIdx] === 0) continue;
-
-      // Found a component
-      let minX = x, maxX = x, minY = y, maxY = y;
-      const stack = [[x, y]];
-      visited[visitIdx] = 1;
-      let pixelCount = 0;
-
-      while (stack.length > 0) {
-        const [cx, cy] = stack.pop()!;
-        if (cx < minX) minX = cx;
-        if (cx > maxX) maxX = cx;
-        if (cy < minY) minY = cy;
-        if (cy > maxY) maxY = cy;
-        pixelCount++;
-
-        const neighbors = [[cx + 1, cy], [cx - 1, cy], [cx, cy + 1], [cx, cy - 1]];
-        for (const [nx, ny] of neighbors) {
-          if (nx >= 0 && nx < width && ny >= 0 && ny < height) {
-            const nIdx = ny * width + nx;
-            if (erosionMap[nIdx] === 1 && visited[nIdx] === 0) {
-              visited[nIdx] = 1;
-              stack.push([nx, ny]);
-            }
-          }
-        }
-      }
-
-      // Filter noise
-      if (pixelCount > 100 && (maxX - minX) > 20 && (maxY - minY) > 20) {
-        // 4. RESTORE (Expand) the rect to compensate for erosion
-        // We eroded by ~1-2 pixels effectively, but we add more padding to be safe
-        // Also expand to include the original non-eroded boundaries if possible
-        const padding = 10; 
-        rawRects.push({
-            minX: Math.max(0, minX - padding),
-            maxX: Math.min(width, maxX + padding),
-            minY: Math.max(0, minY - padding),
-            maxY: Math.min(height, maxY + padding)
-        });
-      }
-    }
-  }
-
-  onProgress(`Detected ${rawRects.length} potential stickers...`);
-
-  // 5. Smart Merge
-  let mergedRects = mergeRects(rawRects, 5); 
-
-  // --- ULTIMATE FALLBACK: Smart Grid Split ---
-  // If we detect fewer than 10 stickers, it implies heavy sticking or background noise.
-  // We force a 4x4 split and then refine each cell.
-  if (mergedRects.length < 10) {
-     onProgress("⚠️ Sticking detected. Forcing 4x4 Grid Split...");
-     mergedRects = [];
-     
-     const cols = 4;
-     const rows = 4;
-     const cellW = width / cols;
-     const cellH = height / rows;
-     const margin = 2; // Minimal margin to maximize content capture
-
-     for (let r = 0; r < rows; r++) {
-         for (let c = 0; c < cols; c++) {
-             // Define the cell box
-             const cellRect = {
-                 minX: Math.floor(c * cellW + margin),
-                 maxX: Math.floor((c + 1) * cellW - margin),
-                 minY: Math.floor(r * cellH + margin),
-                 maxY: Math.floor((r + 1) * cellH - margin)
-             };
-             
-             // Inside this cell, find the largest object (the sticker)
-             // This removes tiny debris from neighbors
-             const refined = findLargestObjectInRect(cellRect, binaryMap, width);
-             if (refined) {
-                 mergedRects.push(refined);
-             } else {
-                 mergedRects.push(cellRect); // Fallback to raw cell
-             }
-         }
-     }
-  }
-
-  onProgress(`Finalizing ${mergedRects.length} stickers...`);
-
-  const finalSegments: StickerSegment[] = [];
+  // 2. Heavy Erosion (Find Seeds)
+  // We apply erosion multiple times to separate sticky objects
+  onProgress("Applying erosion to separate stickers...");
+  let currentMap = Float32Array.from(binaryMap); // Use Float for calculation if needed, but Uint8 is fine
+  let tempMap = new Uint8Array(width * height);
   
-  for (let i = 0; i < mergedRects.length; i++) {
-    const rect = mergedRects[i];
+  const erosionPasses = 4; // Aggressive erosion
+
+  for (let pass = 0; pass < erosionPasses; pass++) {
+    for (let y = 1; y < height - 1; y++) {
+        for (let x = 1; x < width - 1; x++) {
+            const idx = y * width + x;
+            if (currentMap[idx] === 1) {
+                // If any neighbor is background, turn this to background
+                if (currentMap[idx-1] === 0 || currentMap[idx+1] === 0 || 
+                    currentMap[idx-width] === 0 || currentMap[idx+width] === 0) {
+                    tempMap[idx] = 0;
+                } else {
+                    tempMap[idx] = 1;
+                }
+            } else {
+                tempMap[idx] = 0;
+            }
+        }
+    }
+    // Swap maps
+    currentMap = Float32Array.from(tempMap);
+  }
+
+  // 3. Find Connected Components (Seeds) on Eroded Map
+  onProgress("Locating sticker cores...");
+  const seeds: Rect[] = [];
+  const visited = new Uint8Array(width * height);
+  
+  for (let i = 0; i < width * height; i++) {
+      if (currentMap[i] === 1 && visited[i] === 0) {
+          // Found a seed
+          let minX = i % width, maxX = minX;
+          let minY = Math.floor(i / width), maxY = minY;
+          const stack = [i];
+          visited[i] = 1;
+          let count = 0;
+
+          while(stack.length) {
+              const curr = stack.pop()!;
+              const cx = curr % width;
+              const cy = Math.floor(curr / width);
+              
+              if (cx < minX) minX = cx;
+              if (cx > maxX) maxX = cx;
+              if (cy < minY) minY = cy;
+              if (cy > maxY) maxY = cy;
+              count++;
+
+              const neighbors = [curr-1, curr+1, curr-width, curr+width];
+              for(const n of neighbors) {
+                  if (n >= 0 && n < width*height && currentMap[n] === 1 && visited[n] === 0) {
+                      visited[n] = 1;
+                      stack.push(n);
+                  }
+              }
+          }
+
+          if (count > 20) { // Filter noise
+              seeds.push({ minX, maxX, minY, maxY });
+          }
+      }
+  }
+
+  // 4. Region Growing (Restore Boundaries)
+  // For each seed, we expand back to the ORIGINAL binaryMap boundaries
+  onProgress(`Restoring ${seeds.length} stickers...`);
+  
+  const finalRects: Rect[] = [];
+  
+  // To prevent regions from growing into each other, we use a global claimed map
+  const globalClaimed = new Uint8Array(width * height);
+  
+  for (const seed of seeds) {
+      // Start BFS from the center of the seed
+      const centerX = Math.floor((seed.minX + seed.maxX) / 2);
+      const centerY = Math.floor((seed.minY + seed.maxY) / 2);
+      const startIdx = centerY * width + centerX;
+      
+      if (binaryMap[startIdx] === 0) continue; // Should not happen
+
+      let minX = centerX, maxX = centerX;
+      let minY = centerY, maxY = centerY;
+      
+      const stack = [startIdx];
+      globalClaimed[startIdx] = 1;
+
+      while(stack.length) {
+          const curr = stack.pop()!;
+          const cx = curr % width;
+          const cy = Math.floor(curr / width);
+
+          if (cx < minX) minX = cx;
+          if (cx > maxX) maxX = cx;
+          if (cy < minY) minY = cy;
+          if (cy > maxY) maxY = cy;
+
+          // Check 8-neighbors for better coverage
+          const neighbors = [
+              curr-1, curr+1, curr-width, curr+width,
+              curr-width-1, curr-width+1, curr+width-1, curr+width+1
+          ];
+
+          for (const n of neighbors) {
+              if (n >= 0 && n < width*height) {
+                  // Crucial: Only grow if it's foreground in ORIGINAL binaryMap AND not claimed by another sticker
+                  if (binaryMap[n] === 1 && globalClaimed[n] === 0) {
+                      globalClaimed[n] = 1;
+                      stack.push(n);
+                  }
+              }
+          }
+      }
+
+      finalRects.push({ minX, maxX, minY, maxY });
+  }
+
+  // 5. Final Extraction
+  const finalSegments: StickerSegment[] = [];
+  // Sort by position (top-left to bottom-right) to keep order
+  finalRects.sort((a, b) => (a.minY - b.minY) * 1000 + (a.minX - b.minX));
+
+  for (let i = 0; i < finalRects.length; i++) {
+    const rect = finalRects[i];
     
-    // Expand rect significantly for final extraction to catch limbs/hair
+    // Add a safe padding (but check boundaries)
+    const padding = 10;
     const extractRect = {
-        minX: Math.max(0, rect.minX - 15),
-        maxX: Math.min(width, rect.maxX + 15),
-        minY: Math.max(0, rect.minY - 15),
-        maxY: Math.min(height, rect.maxY + 15)
+        minX: Math.max(0, rect.minX - padding),
+        maxX: Math.min(width, rect.maxX + padding),
+        minY: Math.max(0, rect.minY - padding),
+        maxY: Math.min(height, rect.maxY + padding)
     };
 
     const segment = extractStickerFromRect(canvas, extractRect, `sticker_${i + 1}`);
@@ -362,63 +337,6 @@ export const processStickerSheet = async (
         finalSegments.push(segment);
     }
   }
-
+  
   return finalSegments;
 };
-
-/**
- * Helper: Find the bounding box of the largest connected component within a given rect.
- * Used to "clean up" a grid cell.
- */
-function findLargestObjectInRect(rect: Rect, binaryMap: Uint8Array, fullWidth: number): Rect | null {
-    let bestRect: Rect | null = null;
-    let maxPixels = 0;
-    
-    // Create a local visited map for this cell
-    const visited = new Set<number>();
-    
-    for (let y = rect.minY; y < rect.maxY; y++) {
-        for (let x = rect.minX; x < rect.maxX; x++) {
-            const idx = y * fullWidth + x;
-            if (binaryMap[idx] === 1 && !visited.has(idx)) {
-                // Found a component
-                let minX = x, maxX = x, minY = y, maxY = y;
-                let count = 0;
-                const stack = [idx];
-                visited.add(idx);
-                
-                while(stack.length) {
-                    const curr = stack.pop()!;
-                    const cx = curr % fullWidth;
-                    const cy = Math.floor(curr / fullWidth);
-                    
-                    if (cx < minX) minX = cx;
-                    if (cx > maxX) maxX = cx;
-                    if (cy < minY) minY = cy;
-                    if (cy > maxY) maxY = cy;
-                    count++;
-                    
-                    // Check neighbors (only within the cell bounds!)
-                    const neighbors = [curr-1, curr+1, curr-fullWidth, curr+fullWidth];
-                    for (const n of neighbors) {
-                        const nx = n % fullWidth;
-                        const ny = Math.floor(n / fullWidth);
-                        if (nx >= rect.minX && nx < rect.maxX && ny >= rect.minY && ny < rect.maxY) {
-                            if (binaryMap[n] === 1 && !visited.has(n)) {
-                                visited.add(n);
-                                stack.push(n);
-                            }
-                        }
-                    }
-                }
-                
-                if (count > maxPixels) {
-                    maxPixels = count;
-                    bestRect = { minX, maxX, minY, maxY };
-                }
-            }
-        }
-    }
-    
-    return bestRect;
-}
