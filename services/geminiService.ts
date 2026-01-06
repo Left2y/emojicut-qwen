@@ -29,9 +29,9 @@ export const STICKER_STYLES: StickerStyle[] = [
     description: '夸张表情的Q版角色，情绪丰富'
   },
   {
-    id: 'kawaii_pastel',
-    name: '粉彩少女风',
-    description: '柔和粉彩配色，梦幻少女感'
+    id: 'retro_pixel',
+    name: '8bit像素风',
+    description: '8-bit pixel art style, retro game aesthetic, sharp pixels, nostaglic vibe'
   },
   {
     id: 'dynamic_action',

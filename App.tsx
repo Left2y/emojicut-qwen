@@ -252,7 +252,7 @@ const App: React.FC = () => {
                   {/* Visual placebo buttons */}
                   <div className="style-grid-btn">可爱<br />LINE</div>
                   <div className="style-grid-btn">Q版<br />表情</div>
-                  <div className="style-grid-btn">粉彩<br />少女</div>
+                  <div className="style-grid-btn">8bit<br />像素</div>
                   <div className="style-grid-btn">动感<br />活力</div>
                 </div>
                 <div className="ab-buttons">
