@@ -159,7 +159,36 @@ export const generateStickerSheet = async (
 
     // 3. 构建提示词
     const styleDesc = customStyle?.trim() || style.description;
-    const prompt = `一张包含16个不同表情和动作的贴纸及其排版图。角色特征：${characterDescription}。风格要求：${styleDesc}，${style.name}。排版要求：整齐排列在纯白背景上，角色比例为二头身Q版，每个表情独立，之间有留白。画质要求：高品质，矢量图风格，线条清晰，色彩鲜艳。背景：纯白色(#FFFFFF)，无水印，无文字。`;
+    
+    // 优化后的 Prompt：强制要求表情多样性，打破参考图的表情锁定
+    const prompt = `
+    任务：生成一张包含16个【截然不同】且【生动夸张】的表情包贴纸排版图。
+    
+    核心要求：
+    1. **严禁**重复参考图的表情和姿势！必须展示角色在16种不同情境下的状态。
+    2. **保持角色一致性**：角色的发型、发色、服装特征必须与参考图一致 (${characterDescription})。
+    3. **表情清单**（请涵盖以下情绪）：
+       - 捧腹大笑 (Laughing hard)
+       - 嚎啕大哭 (Crying/Sad)
+       - 暴怒/生气 (Angry/Rage)
+       - 震惊/掉下巴 (Shocked)
+       - 充满爱意/比心 (Love/Heart)
+       - 疑惑/问号脸 (Confused)
+       - 睡觉/流口水 (Sleeping)
+       - 害羞/脸红 (Shy)
+       - 尴尬/流汗 (Awkward)
+       - 闪亮登场/自信 (Confident)
+       - 疲惫/魂飞魄散 (Tired)
+       - 吃惊/吓一跳 (Scared)
+       - 庆祝/撒花 (Celebrating)
+       - 拒绝/打叉 (No/Reject)
+       - 好的/点赞 (OK/Thumbs up)
+       - 正在吃东西 (Eating)
+
+    风格要求：${styleDesc}，${style.name}。
+    画面排版：16个角色整齐排列在纯白背景上，角色比例为Q版二头身，肢体动作幅度大，画面张力强。
+    技术要求：高品质，矢量图风格，线条清晰，色彩鲜艳。背景必须是纯白色(#FFFFFF)，无水印。
+    `;
 
     // 4. 调用 wan2.6-image 生成贴纸
     // 该模型需要参考图输入 (Image-to-Image)
