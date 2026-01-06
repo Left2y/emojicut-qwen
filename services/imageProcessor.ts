@@ -318,7 +318,7 @@ export const processStickerSheet = async (
      const rows = 4;
      const cellW = width / cols;
      const cellH = height / rows;
-     const margin = 15; // Cut inside the cell to avoid neighbor's limbs
+     const margin = 2; // Minimal margin to maximize content capture
 
      for (let r = 0; r < rows; r++) {
          for (let c = 0; c < cols; c++) {
@@ -349,12 +349,12 @@ export const processStickerSheet = async (
   for (let i = 0; i < mergedRects.length; i++) {
     const rect = mergedRects[i];
     
-    // Slight expansion for final extraction
+    // Expand rect significantly for final extraction to catch limbs/hair
     const extractRect = {
-        minX: Math.max(0, rect.minX - 5),
-        maxX: Math.min(width, rect.maxX + 5),
-        minY: Math.max(0, rect.minY - 5),
-        maxY: Math.min(height, rect.maxY + 5)
+        minX: Math.max(0, rect.minX - 15),
+        maxX: Math.min(width, rect.maxX + 15),
+        minY: Math.max(0, rect.minY - 15),
+        maxY: Math.min(height, rect.maxY + 15)
     };
 
     const segment = extractStickerFromRect(canvas, extractRect, `sticker_${i + 1}`);

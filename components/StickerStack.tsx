@@ -37,10 +37,11 @@ interface DraggableProps {
 }
 
 const DraggableSticker: React.FC<DraggableProps> = ({ sticker, index, total }) => {
-    // Randomize initial spread slightly for that "pile" look
-    const initialRotation = useRef(Math.random() * 30 - 15);
-    const initialX = useRef(Math.random() * 40 - 20);
-    const initialY = useRef(Math.random() * 40 - 20 + (index * 2)); // slight stacking effect
+    // Randomize initial spread MUCH more for a scattered look
+    // Spread across a 600x400 area roughly
+    const initialRotation = useRef(Math.random() * 60 - 30); // +/- 30 deg
+    const initialX = useRef(Math.random() * 600 - 300);      // +/- 300px horizontal
+    const initialY = useRef(Math.random() * 400 - 100);      // +/- 200px vertical + offset
 
     const [position, setPosition] = useState({ x: initialX.current, y: initialY.current });
     const [isDragging, setIsDragging] = useState(false);
