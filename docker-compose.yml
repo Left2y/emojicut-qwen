@@ -1,0 +1,13 @@
+version: '3.8'
+
+services:
+  emojicut:
+    container_name: emojicut-qwen
+    build: .
+    restart: always
+    ports:
+      - "3002:3002"
+    environment:
+      # 在这里填入您的阿里云 API Key
+      - DASHSCOPE_API_KEY=your_key_here
+      - PORT=3002
