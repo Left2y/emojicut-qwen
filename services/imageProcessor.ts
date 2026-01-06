@@ -43,18 +43,18 @@ const mergeRects = (rects: Rect[], distanceThreshold: number): Rect[] => {
 
     for (let i = 0; i < merged.length; i++) {
       if (visited.has(i)) continue;
-      
+
       let current = { ...merged[i] };
       visited.add(i);
 
       for (let j = i + 1; j < merged.length; j++) {
         if (visited.has(j)) continue;
-        
+
         const other = merged[j];
-        
+
         const xDist = Math.max(0, current.minX - other.maxX, other.minX - current.maxX);
         const yDist = Math.max(0, current.minY - other.maxY, other.minY - current.maxY);
-        
+
         if (xDist < distanceThreshold && yDist < distanceThreshold) {
           current.minX = Math.min(current.minX, other.minX);
           current.minY = Math.min(current.minY, other.minY);
@@ -79,85 +79,142 @@ export const extractStickerFromRect = (
   rect: Rect,
   defaultName: string = 'sticker'
 ): StickerSegment | null => {
-    const padding = 5; // Increased padding
-    const strokeWidth = 6; 
+  // 1. First Pass: Get the raw crop from the calculated rect
+  const rawX = Math.max(0, rect.minX);
+  const rawY = Math.max(0, rect.minY);
+  const rawW = Math.min(source.width - rawX, rect.maxX - rect.minX);
+  const rawH = Math.min(source.height - rawY, rect.maxY - rect.minY);
 
-    const width = source.width;
-    const height = source.height;
+  if (rawW <= 0 || rawH <= 0) return null;
 
-    const finalX = Math.max(0, rect.minX - padding);
-    const finalY = Math.max(0, rect.minY - padding);
-    const finalW = Math.min(width - finalX, (rect.maxX - rect.minX) + padding * 2);
-    const finalH = Math.min(height - finalY, (rect.maxY - rect.minY) + padding * 2);
+  const tempCanvas = document.createElement('canvas');
+  tempCanvas.width = rawW;
+  tempCanvas.height = rawH;
+  const tempCtx = tempCanvas.getContext('2d', { willReadFrequently: true });
+  if (!tempCtx) return null;
 
-    if (finalW <= 0 || finalH <= 0) return null;
+  tempCtx.drawImage(
+    source,
+    rawX, rawY, rawW, rawH,
+    0, 0, rawW, rawH
+  );
 
-    const segCanvas = document.createElement('canvas');
-    segCanvas.width = finalW;
-    segCanvas.height = finalH;
-    const segCtx = segCanvas.getContext('2d');
-    if (!segCtx) return null;
+  // 2. Second Pass: Find the TRUE bounding box of the non-transparent pixels
+  // This eliminates any dead space if the initial rect was too loose
+  const imgData = tempCtx.getImageData(0, 0, rawW, rawH);
+  const tempData = imgData.data;
+  let minX = rawW, maxX = 0, minY = rawH, maxY = 0;
+  let found = false;
 
-    segCtx.drawImage(
-      source,
-      finalX, finalY, finalW, finalH,
-      0, 0, finalW, finalH
-    );
-
-    const segImageData = segCtx.getImageData(0, 0, finalW, finalH);
-    const segPixels = segImageData.data;
-    
-    // Aggressive background removal
-    for (let i = 0; i < segPixels.length; i += 4) {
-      if (isBackground(segPixels[i], segPixels[i+1], segPixels[i+2], segPixels[i+3], 240)) {
-        segPixels[i+3] = 0; 
+  // Aggressive background check during bounding box search
+  for (let y = 0; y < rawH; y++) {
+    for (let x = 0; x < rawW; x++) {
+      const i = (y * rawW + x) * 4;
+      // Check for non-transparent AND non-white-ish pixels
+      const r = tempData[i], g = tempData[i + 1], b = tempData[i + 2], a = tempData[i + 3];
+      if (a > 20 && !isBackground(r, g, b, a, 240)) {
+        if (x < minX) minX = x;
+        if (x > maxX) maxX = x;
+        if (y < minY) minY = y;
+        if (y > maxY) maxY = y;
+        found = true;
       }
     }
-    segCtx.putImageData(segImageData, 0, 0);
+  }
 
-    // Silhouette & Stroke Logic
-    const silhouetteCanvas = document.createElement('canvas');
-    silhouetteCanvas.width = finalW;
-    silhouetteCanvas.height = finalH;
-    const sCtx = silhouetteCanvas.getContext('2d');
-    if (!sCtx) return null;
+  if (!found) return null; // Empty or pure white rect
 
-    sCtx.drawImage(segCanvas, 0, 0);
-    sCtx.globalCompositeOperation = 'source-in';
-    sCtx.fillStyle = '#FFFFFF';
-    sCtx.fillRect(0, 0, finalW, finalH);
+  // 3. Final Crop Dimensions
+  const contentW = maxX - minX + 1;
+  const contentH = maxY - minY + 1;
 
-    const finalCanvas = document.createElement('canvas');
-    finalCanvas.width = finalW + (strokeWidth * 2);
-    finalCanvas.height = finalH + (strokeWidth * 2);
-    const fCtx = finalCanvas.getContext('2d');
-    if (!fCtx) return null;
+  // Add consistent small padding for the sticker border effect
+  const stickerPadding = 16; // Moderate padding for the white border
+  const finalW = contentW + (stickerPadding * 2);
+  const finalH = contentH + (stickerPadding * 2);
 
-    fCtx.imageSmoothingEnabled = true;
-    fCtx.imageSmoothingQuality = 'high';
+  const segCanvas = document.createElement('canvas');
+  segCanvas.width = finalW;
+  segCanvas.height = finalH;
+  const segCtx = segCanvas.getContext('2d');
+  if (!segCtx) return null;
 
-    const steps = 24; 
-    for (let i = 0; i < steps; i++) {
-        const angle = (i / steps) * 2 * Math.PI;
-        const ox = strokeWidth + Math.cos(angle) * strokeWidth;
-        const oy = strokeWidth + Math.sin(angle) * strokeWidth;
-        fCtx.drawImage(silhouetteCanvas, ox, oy);
+  // Draw the content centered in the padded canvas
+  segCtx.drawImage(
+    tempCanvas,
+    minX, minY, contentW, contentH,
+    stickerPadding, stickerPadding, contentW, contentH
+  );
+
+  // CRITICAL FIX: Remove white background pixels to ensure die-cut shape
+  // Otherwise the sticker is just a white box
+  const segImageData = segCtx.getImageData(0, 0, finalW, finalH);
+  const data = segImageData.data;
+  const bgThreshold = 250; // Very high threshold for pure white AI background
+
+  for (let i = 0; i < data.length; i += 4) {
+    const r = data[i];
+    const g = data[i + 1];
+    const b = data[i + 2];
+    const a = data[i + 3];
+
+    // Simple color keying: if close to white, make transparent
+    if (a > 20 && r > bgThreshold && g > bgThreshold && b > bgThreshold) {
+      data[i + 3] = 0;
     }
-    fCtx.drawImage(silhouetteCanvas, strokeWidth, strokeWidth);
+  }
+  segCtx.putImageData(segImageData, 0, 0);
 
-    fCtx.globalCompositeOperation = 'source-over';
-    fCtx.drawImage(segCanvas, strokeWidth, strokeWidth);
+  // 4. White Silhouette & Stroke
+  const strokeWidth = 6;
 
-    return {
-      id: crypto.randomUUID(),
-      dataUrl: finalCanvas.toDataURL('image/png'),
-      originalX: finalX,
-      originalY: finalY,
-      width: finalCanvas.width,
-      height: finalCanvas.height,
-      name: defaultName,
-      isNaming: false
-    };
+  // Create silhouette from the actual content
+  const silhouetteCanvas = document.createElement('canvas');
+  silhouetteCanvas.width = finalW;
+  silhouetteCanvas.height = finalH;
+  const sCtx = silhouetteCanvas.getContext('2d');
+  if (!sCtx) return null;
+
+  sCtx.drawImage(segCanvas, 0, 0);
+  sCtx.globalCompositeOperation = 'source-in';
+  sCtx.fillStyle = '#FFFFFF';
+  sCtx.fillRect(0, 0, finalW, finalH);
+
+  // Final composition canvas
+  const finalCanvas = document.createElement('canvas');
+  finalCanvas.width = finalW + (strokeWidth * 2);
+  finalCanvas.height = finalH + (strokeWidth * 2);
+  const fCtx = finalCanvas.getContext('2d');
+  if (!fCtx) return null;
+
+  fCtx.imageSmoothingEnabled = true;
+  fCtx.imageSmoothingQuality = 'high';
+
+  // Draw stroke (multiple passes for thickness)
+  const steps = 24;
+  for (let i = 0; i < steps; i++) {
+    const angle = (i / steps) * 2 * Math.PI;
+    const ox = strokeWidth + Math.cos(angle) * strokeWidth;
+    const oy = strokeWidth + Math.sin(angle) * strokeWidth;
+    fCtx.drawImage(silhouetteCanvas, ox, oy);
+  }
+  // Middle fill for stroke
+  fCtx.drawImage(silhouetteCanvas, strokeWidth, strokeWidth);
+
+  // Draw original segmented content on top
+  fCtx.globalCompositeOperation = 'source-over';
+  fCtx.drawImage(segCanvas, strokeWidth, strokeWidth);
+
+  return {
+    id: crypto.randomUUID(),
+    dataUrl: finalCanvas.toDataURL('image/png'),
+    originalX: rawX + minX, // Approximate original position
+    originalY: rawY + minY,
+    width: finalCanvas.width,
+    height: finalCanvas.height,
+    name: defaultName,
+    isNaming: false
+  };
 };
 
 /**
@@ -171,7 +228,7 @@ export const processStickerSheet = async (
   canvas.width = image.width;
   canvas.height = image.height;
   const ctx = canvas.getContext('2d', { willReadFrequently: true });
-  
+
   if (!ctx) throw new Error("Could not get canvas context");
 
   ctx.drawImage(image, 0, 0);
@@ -183,7 +240,7 @@ export const processStickerSheet = async (
   // 1. Binary Map Generation & Pre-processing (Closing)
   // Foreground = 1, Background = 0
   const binaryMap = new Uint8Array(width * height);
-  const bgThreshold = 240; 
+  const bgThreshold = 240;
 
   for (let i = 0; i < width * height; i++) {
     const idx = i * 4;
@@ -192,176 +249,148 @@ export const processStickerSheet = async (
     }
   }
 
-  // --- Step 1.5: Closing Operation (Dilation -> Erosion) ---
-  // Goal: Fill internal gaps (eyes, mouth, lines) to make the character a solid block
-  onProgress("Solidifying shapes...");
-  
-  // Dilation (Expand white areas)
+  // --- Step 2: "Opening" Strategy (Erosion then Dilation/Growth) ---
+  // Goal: Break thin connections between stickers by Eroding first.
+
+  // 1. Heavy Erosion to find "cores" (Seeds)
+  onProgress("Separating touching stickers...");
+
   let currentMap = Float32Array.from(binaryMap);
   let tempMap = new Uint8Array(width * height);
-  const closingRadius = 2; // Radius to bridge gaps
-
-  for (let y = 0; y < height; y++) {
-      for (let x = 0; x < width; x++) {
-          const idx = y * width + x;
-          if (binaryMap[idx] === 1) {
-              tempMap[idx] = 1;
-              // Spread to neighbors
-              for (let dy = -closingRadius; dy <= closingRadius; dy++) {
-                  for (let dx = -closingRadius; dx <= closingRadius; dx++) {
-                      const ny = y + dy;
-                      const nx = x + dx;
-                      if (ny >= 0 && ny < height && nx >= 0 && nx < width) {
-                          tempMap[ny * width + nx] = 1;
-                      }
-                  }
-              }
-          }
-      }
-  }
-  
-  // Update binary map with the dilated version for the next step (erosion)
-  // We keep the original 'binaryMap' untouched for the final masking? 
-  // No, we want to perform erosion on this 'solid' map to find centroids.
-  currentMap = Float32Array.from(tempMap);
-
-  // 2. Erosion (Find Seeds)
-  // Reduce erosion passes to avoid splitting thin necks/limbs
-  onProgress("Separating distinct stickers...");
-  
-  const erosionPasses = 3; // Reduced from 4
+  const erosionPasses = 6; // Aggressive erosion to separate connected stickers
 
   for (let pass = 0; pass < erosionPasses; pass++) {
     for (let y = 1; y < height - 1; y++) {
-        for (let x = 1; x < width - 1; x++) {
-            const idx = y * width + x;
-            if (currentMap[idx] === 1) {
-                // Erosion logic: if any neighbor is 0, become 0
-                if (currentMap[idx-1] === 0 || currentMap[idx+1] === 0 || 
-                    currentMap[idx-width] === 0 || currentMap[idx+width] === 0) {
-                    tempMap[idx] = 0;
-                } else {
-                    tempMap[idx] = 1;
-                }
-            } else {
-                tempMap[idx] = 0;
-            }
+      for (let x = 1; x < width - 1; x++) {
+        const idx = y * width + x;
+        if (currentMap[idx] === 1) {
+          // Strict 4-neighbor erosion
+          if (currentMap[idx - 1] === 0 || currentMap[idx + 1] === 0 ||
+            currentMap[idx - width] === 0 || currentMap[idx + width] === 0) {
+            tempMap[idx] = 0;
+          } else {
+            tempMap[idx] = 1;
+          }
+        } else {
+          tempMap[idx] = 0;
         }
+      }
     }
     currentMap = Float32Array.from(tempMap);
   }
+
 
   // 3. Find Connected Components (Seeds) & Merge Close Seeds
   onProgress("Locating cores...");
   const seeds: Rect[] = [];
   const visited = new Uint8Array(width * height);
-  
+
   for (let i = 0; i < width * height; i++) {
-      if (currentMap[i] === 1 && visited[i] === 0) {
-          // Found a seed
-          let minX = i % width, maxX = minX;
-          let minY = Math.floor(i / width), maxY = minY;
-          const stack = [i];
-          visited[i] = 1;
-          
-          while(stack.length) {
-              const curr = stack.pop()!;
-              const cx = curr % width;
-              const cy = Math.floor(curr / width);
-              
-              if (cx < minX) minX = cx;
-              if (cx > maxX) maxX = cx;
-              if (cy < minY) minY = cy;
-              if (cy > maxY) maxY = cy;
+    if (currentMap[i] === 1 && visited[i] === 0) {
+      // Found a seed
+      let minX = i % width, maxX = minX;
+      let minY = Math.floor(i / width), maxY = minY;
+      const stack = [i];
+      visited[i] = 1;
 
-              const neighbors = [curr-1, curr+1, curr-width, curr+width];
-              for(const n of neighbors) {
-                  if (n >= 0 && n < width*height && currentMap[n] === 1 && visited[n] === 0) {
-                      visited[n] = 1;
-                      stack.push(n);
-                  }
-              }
-          }
+      while (stack.length) {
+        const curr = stack.pop()!;
+        const cx = curr % width;
+        const cy = Math.floor(curr / width);
 
-          // Merge Logic: If this seed is very close to an existing seed, merge them
-          // This prevents "Head" and "Body" from being separate seeds
-          const newSeed = { minX, maxX, minY, maxY };
-          let merged = false;
-          
-          for (let s = 0; s < seeds.length; s++) {
-              const existing = seeds[s];
-              // Check distance between bounding boxes
-              const xDist = Math.max(0, newSeed.minX - existing.maxX, existing.minX - newSeed.maxX);
-              const yDist = Math.max(0, newSeed.minY - existing.maxY, existing.minY - newSeed.maxY);
-              
-              // Threshold: 30px (If parts are within 30px, they belong to the same person)
-              if (xDist < 30 && yDist < 30) {
-                  existing.minX = Math.min(existing.minX, newSeed.minX);
-                  existing.maxX = Math.max(existing.maxX, newSeed.maxX);
-                  existing.minY = Math.min(existing.minY, newSeed.minY);
-                  existing.maxY = Math.max(existing.maxY, newSeed.maxY);
-                  merged = true;
-                  break;
-              }
+        if (cx < minX) minX = cx;
+        if (cx > maxX) maxX = cx;
+        if (cy < minY) minY = cy;
+        if (cy > maxY) maxY = cy;
+
+        const neighbors = [curr - 1, curr + 1, curr - width, curr + width];
+        for (const n of neighbors) {
+          if (n >= 0 && n < width * height && currentMap[n] === 1 && visited[n] === 0) {
+            visited[n] = 1;
+            stack.push(n);
           }
-          
-          if (!merged) {
-              seeds.push(newSeed);
-          }
+        }
       }
+
+      // Merge Logic: If this seed is very close to an existing seed, merge them
+      // This prevents "Head" and "Body" from being separate seeds
+      const newSeed = { minX, maxX, minY, maxY };
+      let merged = false;
+
+      for (let s = 0; s < seeds.length; s++) {
+        const existing = seeds[s];
+        // Check distance between bounding boxes
+        const xDist = Math.max(0, newSeed.minX - existing.maxX, existing.minX - newSeed.maxX);
+        const yDist = Math.max(0, newSeed.minY - existing.maxY, existing.minY - newSeed.maxY);
+
+        // Threshold: 30px (If parts are within 30px, they belong to the same person)
+        if (xDist < 30 && yDist < 30) {
+          existing.minX = Math.min(existing.minX, newSeed.minX);
+          existing.maxX = Math.max(existing.maxX, newSeed.maxX);
+          existing.minY = Math.min(existing.minY, newSeed.minY);
+          existing.maxY = Math.max(existing.maxY, newSeed.maxY);
+          merged = true;
+          break;
+        }
+      }
+
+      if (!merged) {
+        seeds.push(newSeed);
+      }
+    }
   }
 
   // 4. Region Growing (Restore Boundaries)
   // For each seed, we expand back to the ORIGINAL binaryMap boundaries
   onProgress(`Restoring ${seeds.length} stickers...`);
-  
+
   const finalRects: Rect[] = [];
-  
+
   // To prevent regions from growing into each other, we use a global claimed map
   const globalClaimed = new Uint8Array(width * height);
-  
+
   for (const seed of seeds) {
-      // Start BFS from the center of the seed
-      const centerX = Math.floor((seed.minX + seed.maxX) / 2);
-      const centerY = Math.floor((seed.minY + seed.maxY) / 2);
-      const startIdx = centerY * width + centerX;
-      
-      if (binaryMap[startIdx] === 0) continue; // Should not happen
+    // Start BFS from the center of the seed
+    const centerX = Math.floor((seed.minX + seed.maxX) / 2);
+    const centerY = Math.floor((seed.minY + seed.maxY) / 2);
+    const startIdx = centerY * width + centerX;
 
-      let minX = centerX, maxX = centerX;
-      let minY = centerY, maxY = centerY;
-      
-      const stack = [startIdx];
-      globalClaimed[startIdx] = 1;
+    if (binaryMap[startIdx] === 0) continue; // Should not happen
 
-      while(stack.length) {
-          const curr = stack.pop()!;
-          const cx = curr % width;
-          const cy = Math.floor(curr / width);
+    let minX = centerX, maxX = centerX;
+    let minY = centerY, maxY = centerY;
 
-          if (cx < minX) minX = cx;
-          if (cx > maxX) maxX = cx;
-          if (cy < minY) minY = cy;
-          if (cy > maxY) maxY = cy;
+    const stack = [startIdx];
+    globalClaimed[startIdx] = 1;
 
-          // Check 8-neighbors for better coverage
-          const neighbors = [
-              curr-1, curr+1, curr-width, curr+width,
-              curr-width-1, curr-width+1, curr+width-1, curr+width+1
-          ];
+    while (stack.length) {
+      const curr = stack.pop()!;
+      const cx = curr % width;
+      const cy = Math.floor(curr / width);
 
-          for (const n of neighbors) {
-              if (n >= 0 && n < width*height) {
-                  // Crucial: Only grow if it's foreground in ORIGINAL binaryMap AND not claimed by another sticker
-                  if (binaryMap[n] === 1 && globalClaimed[n] === 0) {
-                      globalClaimed[n] = 1;
-                      stack.push(n);
-                  }
-              }
+      if (cx < minX) minX = cx;
+      if (cx > maxX) maxX = cx;
+      if (cy < minY) minY = cy;
+      if (cy > maxY) maxY = cy;
+
+      // Check 8-neighbors for better coverage
+      const neighbors = [
+        curr - 1, curr + 1, curr - width, curr + width,
+        curr - width - 1, curr - width + 1, curr + width - 1, curr + width + 1
+      ];
+
+      for (const n of neighbors) {
+        if (n >= 0 && n < width * height) {
+          // Crucial: Only grow if it's foreground in ORIGINAL binaryMap AND not claimed by another sticker
+          if (binaryMap[n] === 1 && globalClaimed[n] === 0) {
+            globalClaimed[n] = 1;
+            stack.push(n);
           }
+        }
       }
+    }
 
-      finalRects.push({ minX, maxX, minY, maxY });
+    finalRects.push({ minX, maxX, minY, maxY });
   }
 
   // 5. Final Extraction
@@ -371,21 +400,21 @@ export const processStickerSheet = async (
 
   for (let i = 0; i < finalRects.length; i++) {
     const rect = finalRects[i];
-    
+
     // Add a safe padding (but check boundaries)
-    const padding = 10;
+    // Pass exact detected bounds, padding is handled inside extractStickerFromRect visually
     const extractRect = {
-        minX: Math.max(0, rect.minX - padding),
-        maxX: Math.min(width, rect.maxX + padding),
-        minY: Math.max(0, rect.minY - padding),
-        maxY: Math.min(height, rect.maxY + padding)
+      minX: rect.minX,
+      maxX: rect.maxX,
+      minY: rect.minY,
+      maxY: rect.maxY
     };
 
     const segment = extractStickerFromRect(canvas, extractRect, `sticker_${i + 1}`);
     if (segment) {
-        finalSegments.push(segment);
+      finalSegments.push(segment);
     }
   }
-  
+
   return finalSegments;
 };

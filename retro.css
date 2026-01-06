@@ -1,0 +1,354 @@
+@import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap');
+
+:root {
+    --gb-body: #dedede;
+    --gb-screen-bg: #8bac0f;
+    --gb-screen-frame: #333;
+    --gb-text: #0f380f;
+    --gb-button: #333;
+    --gb-button-ab: #a82e4e;
+    --gb-font: 'Press Start 2P', cursive;
+}
+
+body {
+    font-family: var(--gb-font);
+    color: var(--gb-text);
+    background-color: var(--gb-screen-bg);
+    background-image:
+        linear-gradient(rgba(15, 56, 15, 0.1) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(15, 56, 15, 0.1) 1px, transparent 1px);
+    background-size: 32px 32px;
+    margin: 0;
+    overflow-x: hidden;
+}
+
+/* Container for the handheld */
+.shojo-container {
+    background: transparent;
+    padding: 0;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+}
+
+/* Machine / GameBoy Body */
+.cute-machine {
+    background: var(--gb-body);
+    width: 360px;
+    height: 600px;
+    border-radius: 15px 15px 60px 15px;
+    box-shadow:
+        10px 10px 0 rgba(0, 0, 0, 0.2),
+        inset -5px -5px 0 rgba(0, 0, 0, 0.1);
+    position: relative;
+    padding: 24px;
+    display: flex;
+    flex-direction: column;
+    border: none;
+}
+
+.cute-machine::before {
+    content: "";
+    position: absolute;
+    top: 10px;
+    left: 10px;
+    right: 10px;
+    border-top: 2px solid rgba(255, 255, 255, 0.5);
+    height: 20px;
+}
+
+/* Screen Frame */
+.machine-screen {
+    background: var(--gb-screen-frame);
+    border-radius: 10px 10px 10px 10px;
+    padding: 40px 50px;
+    position: relative;
+    border: none;
+    cursor: pointer;
+    box-shadow: inset 0 0 20px #000;
+}
+
+.machine-screen::after {
+    content: "DOT MATRIX WITH STEREO SOUND";
+    position: absolute;
+    bottom: -22px;
+    width: 100%;
+    left: 0;
+    text-align: center;
+    color: #999;
+    font-size: 14px;
+    letter-spacing: 1px;
+}
+
+/* Inner Screen */
+.machine-screen-tall {
+    background: var(--gb-screen-bg);
+    width: 100%;
+    height: 220px;
+    border: 4px solid #444;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+    overflow: hidden;
+}
+
+.machine-screen-tall::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background:
+        repeating-linear-gradient(0deg, transparent, transparent 1px, rgba(0, 0, 0, 0.05) 1px, rgba(0, 0, 0, 0.05) 2px);
+    pointer-events: none;
+}
+
+.screen-text {
+    font-family: var(--gb-font);
+    font-size: 18px;
+    color: var(--gb-text);
+    text-transform: uppercase;
+    line-height: 1.8;
+}
+
+/* Progress Bar */
+.progress-container {
+    width: 80%;
+    height: 16px;
+    border: 2px solid var(--gb-text);
+    margin-top: 15px;
+    padding: 2px;
+    background: transparent;
+}
+
+.progress-bar {
+    height: 100%;
+    background: var(--gb-text);
+    transition: width 0.3s ease;
+}
+
+/* GameBoy Controls Area */
+.gameboy-controls {
+    margin-top: 60px;
+    display: flex;
+    flex-direction: column;
+}
+
+.controls-top {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    padding: 0 2px;
+}
+
+/* Style Buttons Grid (Replaces D-Pad) */
+.style-pad-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    width: 160px;
+    /* Detailed fit */
+}
+
+.style-grid-btn {
+    position: relative;
+    background: transparent;
+    border: 2px solid var(--gb-button);
+    cursor: pointer;
+    box-shadow: 2px 2px 0 #000;
+    transition: transform 0.1s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--gb-text);
+    font-family: var(--gb-font);
+    font-size: 8px;
+    /* Tiny font for dense text */
+    padding: 2px;
+    height: 48px;
+    text-align: center;
+    line-height: 1.2;
+    word-break: break-all;
+}
+
+.style-grid-btn:active,
+.style-grid-btn.active {
+    transform: translate(1px, 1px);
+    box-shadow: 1px 1px 0 #000;
+    background: var(--gb-button);
+    color: var(--gb-body);
+}
+
+.style-grid-btn.active {
+    border-color: var(--gb-button);
+}
+
+/* A/B Buttons */
+.ab-buttons {
+    transform: rotate(-25deg);
+    display: flex;
+    gap: 15px;
+    margin-top: 10px;
+}
+
+.gb-btn-round {
+    width: 45px;
+    height: 45px;
+    background: var(--gb-button-ab);
+    border: none;
+    border-radius: 50%;
+    color: rgba(0, 0, 0, 0.4);
+    font-weight: bold;
+    font-size: 16px;
+    cursor: pointer;
+    box-shadow: 4px 4px 0 #000;
+}
+
+.gb-btn-round:active {
+    transform: translate(2px, 2px);
+    box-shadow: 2px 2px 0 #000;
+}
+
+.ab-label {
+    position: absolute;
+    bottom: -22px;
+    width: 100%;
+    text-align: center;
+    color: #888;
+    font-size: 10px;
+    transform: rotate(25deg);
+}
+
+/* Start/Select Pills */
+.controls-bottom {
+    display: flex;
+    justify-content: center;
+    gap: 30px;
+    margin-top: 40px;
+}
+
+.gb-btn-pill {
+    width: 50px;
+    height: 12px;
+    background: #999;
+    border-radius: 10px;
+    transform: rotate(-25deg);
+    box-shadow: 2px 2px 0 #666;
+    position: relative;
+}
+
+.pill-label {
+    position: absolute;
+    bottom: -22px;
+    left: 1/2;
+    transform: translateX(-50%) rotate(25deg);
+    width: auto;
+    text-align: center;
+    color: #888;
+    font-size: 14px;
+    font-weight: bold;
+    white-space: nowrap;
+}
+
+/* Output Slot Fix for Retro */
+.output-slot-2d {
+    background: #222;
+    height: 6px;
+    width: 100%;
+    margin-bottom: 20px;
+    box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.5);
+    border-radius: 3px;
+}
+
+/* Stickers Stack styling */
+.sticker-segment {
+    background: transparent;
+    padding: 0;
+    border: none;
+    /* Irregular drop shadow for die-cut look */
+    filter:
+        drop-shadow(0 2px 4px rgba(0, 0, 0, 0.3));
+    image-rendering: auto;
+    transition: transform 0.2s ease;
+}
+
+.sticker-segment:hover {
+    transform: scale(1.05);
+    /* Subtle pop on hover */
+    filter: drop-shadow(0 8px 12px rgba(0, 0, 0, 0.4));
+}
+
+.sticker-segment img {
+    /* Apply a white stroke effect via filter */
+    filter: drop-shadow(0 0 0 4px white);
+    /* Prevent the drop-shadow from being clipped */
+    margin: 10px;
+    display: block;
+}
+
+/* Navigation tabs (if any) */
+.mode-tabs {
+    display: flex;
+    gap: 10px;
+    margin-top: 20px;
+}
+
+.mode-tab {
+    padding: 10px 20px;
+    background: #444;
+    color: #888;
+    border: 2px solid #222;
+    font-size: 16px;
+    cursor: pointer;
+}
+
+.mode-tab.active {
+    background: #666;
+    color: white;
+    border-color: #eee;
+}
+
+/* Style Inputs */
+.printer-style-input {
+    background: var(--gb-screen-bg);
+    border: 2px solid var(--gb-text);
+    color: var(--gb-text);
+    font-family: 'Press Start 2P', cursive;
+    font-size: 14px;
+    padding: 8px;
+    width: 90%;
+}
+
+.style-chip {
+    background: transparent;
+    border: 1px solid var(--gb-text);
+    color: var(--gb-text);
+    font-size: 12px;
+    text-transform: uppercase;
+}
+
+.style-chip.selected {
+    background: var(--gb-text);
+    color: var(--gb-screen-bg);
+}
+
+/* Results Back Button */
+.cute-btn {
+    font-family: var(--gb-font);
+    text-transform: uppercase;
+    font-size: 12px;
+    border: 2px solid var(--gb-text) !important;
+    box-shadow: 4px 4px 0 #000 !important;
+    background: var(--gb-body) !important;
+    color: var(--gb-text) !important;
+}
+
+.cute-btn:active {
+    transform: translate(2px, 2px);
+    box-shadow: 2px 2px 0 #000 !important;
+}

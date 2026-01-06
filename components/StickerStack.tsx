@@ -105,28 +105,22 @@ const DraggableSticker: React.FC<DraggableProps> = ({ sticker, index, total }) =
             onMouseLeave={() => setIsHovered(false)}
         >
             <div
-                className="relative group"
-                style={{
-                    /* Use a clip-path or just transparent image? The prompt asked for "no border". 
-                       PNG has transparency, so just displaying it is fine. 
-                       We add a subtle drop shadow to make it pop from the background. */
-                    filter: 'drop-shadow(0 4px 6px rgba(0,0,0,0.15))'
-                }}
+                className="sticker-segment"
             >
                 <img
                     src={sticker.dataUrl}
                     alt={sticker.name}
-                    className="w-32 h-32 object-contain pointer-events-none select-none"
+                    className="w-full h-full object-contain pointer-events-none select-none drop-shadow-md"
                 />
 
                 {/* Hover Actions */}
-                <div className={`absolute -top-8 left-1/2 -translate-x-1/2 bg-black/75 text-white px-2 py-1 rounded text-xs whitespace-nowrap transition-opacity ${isHovered || isDragging ? 'opacity-100' : 'opacity-0'}`}>
-                    {sticker.name}
+                <div className={`absolute -top-12 left-1/2 -translate-x-1/2 bg-gb-text text-gb-screen-bg px-3 py-2 rounded text-[14px] whitespace-nowrap transition-opacity font-['Press_Start_2P'] border-2 border-black ${isHovered || isDragging ? 'opacity-100' : 'opacity-0'}`}>
+                    {sticker.name.toUpperCase()}
                     <div
                         onClick={handleDownload}
-                        className="absolute -right-2 -top-2 bg-blue-500 hover:bg-blue-600 rounded-full p-1 cursor-pointer pointer-events-auto"
+                        className="mt-2 text-center cursor-pointer hover:underline text-[12px]"
                     >
-                        <Download size={10} />
+                        [SAVE]
                     </div>
                 </div>
             </div>

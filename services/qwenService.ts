@@ -1,10 +1,26 @@
 import { StickerStyle, STICKER_STYLES } from './geminiService';
+export type { StickerStyle };
 export { STICKER_STYLES };
 
 // 阿里云 DashScope API 基础配置
-const API_KEY = process.env.DASHSCOPE_API_KEY || process.env.VITE_DASHSCOPE_API_KEY || '';
+// 在 Vite 中，使用 import.meta.env 读取以 VITE_ 开头的环境变量
+const API_KEY = (import.meta as any).env?.VITE_DASHSCOPE_API_KEY || process.env.DASHSCOPE_API_KEY || '';
 // 使用本地代理路径以避免 CORS 问题
 const BASE_URL = '/api/dashscope';
+
+console.log('[API Config]', {
+  hasKey: !!API_KEY,
+  keyPrefix: API_KEY ? `${API_KEY.substring(0, 4)}...` : 'NONE',
+  baseUrl: BASE_URL,
+  isViteEnv: !!(import.meta as any).env?.VITE_DASHSCOPE_API_KEY
+});
+
+// 开发建议使用稳定模型 (根据用户指定配置)
+const MODELS = {
+  VISION: 'qwen3-vl-plus-2025-12-19',
+  GEN: 'wan2.6-image',
+  NAMING: 'qwen-vl-plus'
+};
 
 /**
  * 助手函数：处理 API 响应并提供鲁棒的错误处理
@@ -19,7 +35,12 @@ async function handleResponse(response: Response) {
     try {
       if (isJson) {
         const errData = await response.json();
-        errorMessage = errData.message || errData.error?.message || errorMessage;
+        console.error('[API Error Data]', errData);
+        errorMessage = errData.message || errData.error?.message || errData.code || errorMessage;
+        // 如果是 500 错误，通常是模型服务端的问题或请求参数不匹配
+        if (response.status === 500) {
+          errorMessage = `服务端错误(500): ${errorMessage}. 请检查模型名称是否正确或图片是否合规。`;
+        }
       } else {
         const text = await response.text();
         // 如果返回的是 HTML，通常是中间件或代理报错
@@ -53,7 +74,7 @@ const compressImage = async (base64Str: string): Promise<string> => {
       const canvas = document.createElement('canvas');
       let width = img.width;
       let height = img.height;
-      
+
       // 限制最大边长为 1024 (既节省 token 又避免 Vercel 413 Payload Too Large)
       const MAX_SIDE = 1024;
       if (width > MAX_SIDE || height > MAX_SIDE) {
@@ -65,12 +86,12 @@ const compressImage = async (base64Str: string): Promise<string> => {
           height = MAX_SIDE;
         }
       }
-      
+
       canvas.width = width;
       canvas.height = height;
       const ctx = canvas.getContext('2d');
       ctx?.drawImage(img, 0, 0, width, height);
-      
+
       // 使用 JPEG 格式压缩，质量 0.8
       resolve(canvas.toDataURL('image/jpeg', 0.8));
     };
@@ -102,7 +123,7 @@ export const analyzeImageFeatures = async (imageInput: string): Promise<string> 
   }
 
   const body = {
-    model: 'qwen3-vl-plus',
+    model: MODELS.VISION,
     input: {
       messages: [
         {
@@ -159,48 +180,60 @@ export const generateStickerSheet = async (
 
     // 3. 构建提示词
     const styleDesc = customStyle?.trim() || style.description;
-    
-    // 优化后的 Prompt：强制要求表情多样性，打破参考图的表情锁定
-    const prompt = `
-    任务：生成一张严格的 4x4 表情包贴纸网格图 (Sticker Sheet)。
-    
-    【核心排版要求】(最高优先级)：
-    1. **严格 4x4 网格布局**：必须是 4行 x 4列，共 16 个角色。
-    2. **超大间距 (Huge Spacing)**：每个角色之间必须有非常宽的留白，绝对不能粘连或重叠！
-    3. **完整性**：每个角色必须完整包含在各自的网格内，严禁画出边缘或被裁切。
-    4. **纯白背景**：背景必须是 #FFFFFF 纯白。
 
-    【内容要求】：
-    角色特征：${characterDescription}。
-    表情清单：需包含 [大笑, 暴怒, 大哭, 震惊, 比心, 疑惑, 睡觉, 害羞, 尴尬, 自信, 疲惫, 恐惧, 庆祝, 拒绝, 点赞, 进食] 等16种截然不同的生动表情。
-    
-    【风格要求】：
-    ${styleDesc}，${style.name}。
-    画风：Q版二头身，轮廓清晰，色彩鲜艳，适合贴纸打印。
-    `;
+    // 优化后的 Prompt：强制要求表情多样性，打破参考图的表情锁定
+    // 优化后的 Json Prompt：强制要求表情多样性，打破参考图的表情锁定
+    const prompt = JSON.stringify({
+      task: "Generate a high-quality sticker sheet based on the reference image.",
+      layout: {
+        grid: "4x4",
+        total_stickers: 16,
+        spacing: "wide_and_clear",
+        background: "pure_white_#FFFFFF",
+        integrity: "full_body_no_cropping"
+      },
+      character: {
+        description: characterDescription,
+        style: `${style.name}, ${styleDesc}`,
+        art_style: "Q-version Chibi, clean thick outlines, vector art style, flat color",
+        consistency: "maintain character identity across all stickers"
+      },
+      expressions: [
+        "laughing", "furious", "crying_loudly", "shocked",
+        "finger_heart", "confused", "sleeping", "shy_blushing",
+        "awkward_sweat", "confident_smug", "exhausted", "terrified",
+        "celebrating", "saying_no_cross_arms", "thumbs_up", "eating_yummy"
+      ],
+      quality_guidelines: {
+        resolution: "high quality, 4k",
+        details: "sharp eyes, expressive face",
+        negative: "blur, low quality, distorted, extra limbs, merged bodies"
+      }
+    });
 
     // 4. 调用 wan2.6-image 生成贴纸
     // 该模型需要参考图输入 (Image-to-Image)
     console.log("正在调用 wan2.6-image 生成贴纸...");
 
     const body = {
-      model: 'wan2.6-image',
+      model: MODELS.GEN,
       input: {
         messages: [
           {
             role: 'user',
             content: [
-              { image: compressedImage }, // 使用压缩后的图片
-              { text: prompt }
+              { text: prompt },
+              { image: compressedImage }
             ]
           }
         ]
       },
       parameters: {
         negative_prompt: "低分辨率，低画质，肢体畸形，手指畸形，画面过饱和，蜡像感，人脸无细节，过度光滑，画面具有AI感。构图混乱。文字模糊，扭曲。",
-        prompt_extend: true,
+        size: "1024*1024",
         watermark: false,
-        size: "1024*1024"
+        n: 1,
+        prompt_extend: true
       }
     };
 
@@ -241,7 +274,7 @@ export const generateStickerName = async (base64Image: string): Promise<string> 
     }
 
     const body = {
-      model: 'qwen3-vl-plus',
+      model: MODELS.NAMING,
       input: {
         messages: [
           {
