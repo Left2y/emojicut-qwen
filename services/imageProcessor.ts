@@ -180,33 +180,63 @@ export const processStickerSheet = async (
 
   onProgress("Preprocessing image...");
 
-  // 1. Binary Map Generation
+  // 1. Binary Map Generation & Pre-processing (Closing)
   // Foreground = 1, Background = 0
   const binaryMap = new Uint8Array(width * height);
   const bgThreshold = 240; 
 
   for (let i = 0; i < width * height; i++) {
     const idx = i * 4;
-    // Strict background check
     if (!isBackground(data[idx], data[idx + 1], data[idx + 2], data[idx + 3], bgThreshold)) {
       binaryMap[i] = 1;
     }
   }
 
-  // 2. Heavy Erosion (Find Seeds)
-  // We apply erosion multiple times to separate sticky objects
-  onProgress("Applying erosion to separate stickers...");
-  let currentMap = Float32Array.from(binaryMap); // Use Float for calculation if needed, but Uint8 is fine
-  let tempMap = new Uint8Array(width * height);
+  // --- Step 1.5: Closing Operation (Dilation -> Erosion) ---
+  // Goal: Fill internal gaps (eyes, mouth, lines) to make the character a solid block
+  onProgress("Solidifying shapes...");
   
-  const erosionPasses = 4; // Aggressive erosion
+  // Dilation (Expand white areas)
+  let currentMap = Float32Array.from(binaryMap);
+  let tempMap = new Uint8Array(width * height);
+  const closingRadius = 2; // Radius to bridge gaps
+
+  for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+          const idx = y * width + x;
+          if (binaryMap[idx] === 1) {
+              tempMap[idx] = 1;
+              // Spread to neighbors
+              for (let dy = -closingRadius; dy <= closingRadius; dy++) {
+                  for (let dx = -closingRadius; dx <= closingRadius; dx++) {
+                      const ny = y + dy;
+                      const nx = x + dx;
+                      if (ny >= 0 && ny < height && nx >= 0 && nx < width) {
+                          tempMap[ny * width + nx] = 1;
+                      }
+                  }
+              }
+          }
+      }
+  }
+  
+  // Update binary map with the dilated version for the next step (erosion)
+  // We keep the original 'binaryMap' untouched for the final masking? 
+  // No, we want to perform erosion on this 'solid' map to find centroids.
+  currentMap = Float32Array.from(tempMap);
+
+  // 2. Erosion (Find Seeds)
+  // Reduce erosion passes to avoid splitting thin necks/limbs
+  onProgress("Separating distinct stickers...");
+  
+  const erosionPasses = 3; // Reduced from 4
 
   for (let pass = 0; pass < erosionPasses; pass++) {
     for (let y = 1; y < height - 1; y++) {
         for (let x = 1; x < width - 1; x++) {
             const idx = y * width + x;
             if (currentMap[idx] === 1) {
-                // If any neighbor is background, turn this to background
+                // Erosion logic: if any neighbor is 0, become 0
                 if (currentMap[idx-1] === 0 || currentMap[idx+1] === 0 || 
                     currentMap[idx-width] === 0 || currentMap[idx+width] === 0) {
                     tempMap[idx] = 0;
@@ -218,12 +248,11 @@ export const processStickerSheet = async (
             }
         }
     }
-    // Swap maps
     currentMap = Float32Array.from(tempMap);
   }
 
-  // 3. Find Connected Components (Seeds) on Eroded Map
-  onProgress("Locating sticker cores...");
+  // 3. Find Connected Components (Seeds) & Merge Close Seeds
+  onProgress("Locating cores...");
   const seeds: Rect[] = [];
   const visited = new Uint8Array(width * height);
   
@@ -234,8 +263,7 @@ export const processStickerSheet = async (
           let minY = Math.floor(i / width), maxY = minY;
           const stack = [i];
           visited[i] = 1;
-          let count = 0;
-
+          
           while(stack.length) {
               const curr = stack.pop()!;
               const cx = curr % width;
@@ -245,7 +273,6 @@ export const processStickerSheet = async (
               if (cx > maxX) maxX = cx;
               if (cy < minY) minY = cy;
               if (cy > maxY) maxY = cy;
-              count++;
 
               const neighbors = [curr-1, curr+1, curr-width, curr+width];
               for(const n of neighbors) {
@@ -256,8 +283,30 @@ export const processStickerSheet = async (
               }
           }
 
-          if (count > 20) { // Filter noise
-              seeds.push({ minX, maxX, minY, maxY });
+          // Merge Logic: If this seed is very close to an existing seed, merge them
+          // This prevents "Head" and "Body" from being separate seeds
+          const newSeed = { minX, maxX, minY, maxY };
+          let merged = false;
+          
+          for (let s = 0; s < seeds.length; s++) {
+              const existing = seeds[s];
+              // Check distance between bounding boxes
+              const xDist = Math.max(0, newSeed.minX - existing.maxX, existing.minX - newSeed.maxX);
+              const yDist = Math.max(0, newSeed.minY - existing.maxY, existing.minY - newSeed.maxY);
+              
+              // Threshold: 30px (If parts are within 30px, they belong to the same person)
+              if (xDist < 30 && yDist < 30) {
+                  existing.minX = Math.min(existing.minX, newSeed.minX);
+                  existing.maxX = Math.max(existing.maxX, newSeed.maxX);
+                  existing.minY = Math.min(existing.minY, newSeed.minY);
+                  existing.maxY = Math.max(existing.maxY, newSeed.maxY);
+                  merged = true;
+                  break;
+              }
+          }
+          
+          if (!merged) {
+              seeds.push(newSeed);
           }
       }
   }
