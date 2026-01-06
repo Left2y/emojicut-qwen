@@ -304,16 +304,41 @@ export const processStickerSheet = async (
 
   onProgress(`Detected ${rawRects.length} potential stickers...`);
 
-  // 5. Smart Merge (prevent merging if it creates a super long/wide strip)
-  // Distance threshold increased because we want to merge parts of the SAME sticker 
-  // that might have been split by erosion, but NOT distinct stickers.
+  // 5. Smart Merge
   let mergedRects = mergeRects(rawRects, 5); 
 
-  // Additional Grid Split Logic if needed (Fallback)
-  if (mergedRects.length < 4 && width > 500) {
-     onProgress("Complex layout detected. Attempting smart segmentation...");
-     if (mergedRects.length === 1) {
-         mergedRects = forceGridSplit(mergedRects[0], width, height);
+  // --- ULTIMATE FALLBACK: Smart Grid Split ---
+  // If we detect fewer than 10 stickers, it implies heavy sticking or background noise.
+  // We force a 4x4 split and then refine each cell.
+  if (mergedRects.length < 10) {
+     onProgress("⚠️ Sticking detected. Forcing 4x4 Grid Split...");
+     mergedRects = [];
+     
+     const cols = 4;
+     const rows = 4;
+     const cellW = width / cols;
+     const cellH = height / rows;
+     const margin = 15; // Cut inside the cell to avoid neighbor's limbs
+
+     for (let r = 0; r < rows; r++) {
+         for (let c = 0; c < cols; c++) {
+             // Define the cell box
+             const cellRect = {
+                 minX: Math.floor(c * cellW + margin),
+                 maxX: Math.floor((c + 1) * cellW - margin),
+                 minY: Math.floor(r * cellH + margin),
+                 maxY: Math.floor((r + 1) * cellH - margin)
+             };
+             
+             // Inside this cell, find the largest object (the sticker)
+             // This removes tiny debris from neighbors
+             const refined = findLargestObjectInRect(cellRect, binaryMap, width);
+             if (refined) {
+                 mergedRects.push(refined);
+             } else {
+                 mergedRects.push(cellRect); // Fallback to raw cell
+             }
+         }
      }
   }
 
@@ -324,12 +349,7 @@ export const processStickerSheet = async (
   for (let i = 0; i < mergedRects.length; i++) {
     const rect = mergedRects[i];
     
-    // Ensure we don't extract empty space. 
-    // We can do a quick check of the center pixel or density if needed, 
-    // but the erosion method is usually robust.
-    
-    // Expand rect slightly more for the final extraction to ensure full coverage (hair, feet)
-    // but clamp to image bounds
+    // Slight expansion for final extraction
     const extractRect = {
         minX: Math.max(0, rect.minX - 5),
         maxX: Math.min(width, rect.maxX + 5),
@@ -345,3 +365,60 @@ export const processStickerSheet = async (
 
   return finalSegments;
 };
+
+/**
+ * Helper: Find the bounding box of the largest connected component within a given rect.
+ * Used to "clean up" a grid cell.
+ */
+function findLargestObjectInRect(rect: Rect, binaryMap: Uint8Array, fullWidth: number): Rect | null {
+    let bestRect: Rect | null = null;
+    let maxPixels = 0;
+    
+    // Create a local visited map for this cell
+    const visited = new Set<number>();
+    
+    for (let y = rect.minY; y < rect.maxY; y++) {
+        for (let x = rect.minX; x < rect.maxX; x++) {
+            const idx = y * fullWidth + x;
+            if (binaryMap[idx] === 1 && !visited.has(idx)) {
+                // Found a component
+                let minX = x, maxX = x, minY = y, maxY = y;
+                let count = 0;
+                const stack = [idx];
+                visited.add(idx);
+                
+                while(stack.length) {
+                    const curr = stack.pop()!;
+                    const cx = curr % fullWidth;
+                    const cy = Math.floor(curr / fullWidth);
+                    
+                    if (cx < minX) minX = cx;
+                    if (cx > maxX) maxX = cx;
+                    if (cy < minY) minY = cy;
+                    if (cy > maxY) maxY = cy;
+                    count++;
+                    
+                    // Check neighbors (only within the cell bounds!)
+                    const neighbors = [curr-1, curr+1, curr-fullWidth, curr+fullWidth];
+                    for (const n of neighbors) {
+                        const nx = n % fullWidth;
+                        const ny = Math.floor(n / fullWidth);
+                        if (nx >= rect.minX && nx < rect.maxX && ny >= rect.minY && ny < rect.maxY) {
+                            if (binaryMap[n] === 1 && !visited.has(n)) {
+                                visited.add(n);
+                                stack.push(n);
+                            }
+                        }
+                    }
+                }
+                
+                if (count > maxPixels) {
+                    maxPixels = count;
+                    bestRect = { minX, maxX, minY, maxY };
+                }
+            }
+        }
+    }
+    
+    return bestRect;
+}
